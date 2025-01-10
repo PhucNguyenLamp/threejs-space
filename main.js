@@ -5,19 +5,18 @@ import { OBJLoader, UnrealBloomPass, RenderPass, EffectComposer, ShaderPass, FXA
 const scene = new THREE.Scene();
 //camera
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
+camera.updateProjectionMatrix()
 camera.position.set(0, 7, 10)
 
 //renderer
-const renderer = new THREE.WebGLRenderer()
+const renderer = new THREE.WebGLRenderer({ precision: "highp" })
 renderer.setSize(window.innerWidth, window.innerHeight)
 document.body.appendChild(renderer.domElement)
 //control
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.autoRotate = true
-controls.autoRotateSpeed = 10
+controls.autoRotateSpeed = 1
 controls.enableDamping = true
-controls.dampingFactor = 0.25
-controls.enablePan = false
 controls.enableRotate = true
 controls.update()
 
@@ -105,43 +104,62 @@ scene.add(sunlight)
 
 // background stars
 function createStarField() {
-    const starCount = 1000
+    const starCount = 1000;
     const starGeometry = new THREE.BufferGeometry();
-    const starPosition = new Float32Array(starCount * 3);
+    const starPositions = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
-        starPosition[i * 3] = (Math.random() - 0.5) * 100
-        starPosition[i * 3 + 1] = (Math.random() - 0.5) * 100
-        starPosition[i * 3 + 2] = (Math.random() - 0.5) * 100
+        starPositions[i * 3] = (Math.random() - 0.5) * 100;
+        starPositions[i * 3 + 1] = (Math.random() - 0.5) * 100;
+        starPositions[i * 3 + 2] = (Math.random() - 0.5) * 100;
     }
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPosition, 3))
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+
     const starMaterial = new THREE.PointsMaterial({
         color: 0xffffff,
         size: 0.1,
-    })
-    const starField = new THREE.Points(starGeometry, starMaterial)
-    scene.add(starField)
+    });
+    const starField = new THREE.Points(starGeometry, starMaterial);
+    scene.add(starField);
 
-    const lineGroup = new THREE.Group()
-    const COLORS = ['#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#FFFFFF', '#0000FF']
-    // random red, orange, yellow, green, white and blue
-    const points = [];
+    // Create lines connecting stars
+    const linePositions = new Float32Array(starCount * 6); // 2 points per line (start and end)
+    const COLORS = ['#FF0000', '#FFA500', '#FFFF00', '#00FF00', '#FFFFFF', '#0000FF'];
+    const lineColors = new Float32Array(starCount * 6); // RGB per vertex
     for (let i = 0; i < starCount; i++) {
-        points.push(new THREE.Vector3(starPosition[i * 3], starPosition[i * 3 + 1], starPosition[i * 3 + 2]));
-        points.push(new THREE.Vector3(starPosition[i * 3] + 1, starPosition[i * 3 + 1] - 0.5, starPosition[i * 3 + 2]+1));
-        const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        // random number from 0 to COLORS.size
+        const x = starPositions[i * 3];
+        const y = starPositions[i * 3 + 1];
+        const z = starPositions[i * 3 + 2];
 
-        const material = new THREE.LineBasicMaterial({
-            color: COLORS[Math.floor(Math.random() * COLORS.length)]
-        });
-        const line = new THREE.Line(geometry, material);
-        lineGroup.add(line);
+        // Start point
+        linePositions[i * 6] = x;
+        linePositions[i * 6 + 1] = y;
+        linePositions[i * 6 + 2] = z;
+
+        // End point with some offset
+        linePositions[i * 6 + 3] = x + 1;
+        linePositions[i * 6 + 4] = y - 0.5;
+        linePositions[i * 6 + 5] = z + 1;
+
+        // Assign colors
+        const color = new THREE.Color(COLORS[Math.floor(Math.random() * COLORS.length)]);
+        lineColors.set([color.r, color.g, color.b, color.r, color.g, color.b], i * 6);
     }
-    scene.add(lineGroup);
 
-    return { starField, lineGroup }
+    const lineGeometry = new THREE.BufferGeometry();
+    lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+    lineGeometry.setAttribute('color', new THREE.BufferAttribute(lineColors, 3));
+
+    const lineMaterial = new THREE.LineBasicMaterial({
+        vertexColors: true, // Use vertex colors
+    });
+
+    const lineSegments = new THREE.LineSegments(lineGeometry, lineMaterial);
+    scene.add(lineSegments);
+
+    return { starField, lineSegments };
 }
-const { starField, lineGroup } = createStarField()
+
+const { starField, lineSegments } = createStarField();
 
 
 
@@ -149,6 +167,8 @@ const { starField, lineGroup } = createStarField()
 let orbitAngle = 0
 const radius = 3;
 function animate() {
+    camera.updateMatrixWorld()
+    controls.update()
     composer.render()
     if (banana) {
         orbitAngle += 0.01
@@ -158,29 +178,25 @@ function animate() {
         banana.rotation.y += 0.014
     }
 
-    // Animate the stars
     const starPositions = starField.geometry.attributes.position;
+    const linePositions = lineSegments.geometry.attributes.position;
+
     for (let i = 0; i < starPositions.count; i++) {
         const x = starPositions.getX(i);
         const y = starPositions.getY(i);
         const z = starPositions.getZ(i);
+
+        // Update star positions
         starPositions.setX(i, x < -50 ? 50 : x - 0.1);
         starPositions.setY(i, y > 50 ? -50 : y + 0.05);
         starPositions.setZ(i, z < -50 ? 50 : z - 0.1);
 
-        const line = lineGroup.children[i]
-        const points = line.geometry.attributes.position.array;
-        points[0] = starPositions.getX(i);
-        points[1] = starPositions.getY(i);
-        points[2] = starPositions.getZ(i);
-        points[3] = starPositions.getX(i) + 4;
-        points[4] = starPositions.getY(i) - 2;
-        points[5] = starPositions.getZ(i) + 4;
-        line.geometry.attributes.position.needsUpdate = true;
-
+        // Update line positions
+        linePositions.setXYZ(i * 2, x, y, z); // Start point
+        linePositions.setXYZ(i * 2 + 1, x + 5, y - 2.5, z + 5); // End point
     }
-    starPositions.needsUpdate = true;
-    controls.update()
 
+    starPositions.needsUpdate = true;
+    linePositions.needsUpdate = true;
 }
 renderer.setAnimationLoop(animate)
